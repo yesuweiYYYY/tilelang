@@ -1,0 +1,637 @@
+文件名: /home/yesuwei/workspace/tilelang/tilelang/utils/sparse.py
+行号: 40
+文件名: /home/yesuwei/workspace/tilelang/examples/deepseek_v4/act_quant.py
+行号: 24
+文件名: /home/yesuwei/workspace/tilelang/examples/deepseek_v4/act_quant.py
+行号: 107
+func_source:
+@tilelang.jit(
+    pass_configs={
+        tilelang.PassConfigKey.TL_DISABLE_WARP_SPECIALIZED: True,
+    }
+)
+def fp8_quant_kernel(
+    x,
+    block_size=128,
+    round_scale=True,  # round scale to exponential of 2
+):
+    """Block-wise FP8 quantization."""
+
+    M = T.dynamic("M")
+    N = T.const("N")
+    fp8_min, fp8_max = -448.0, 448.0
+    in_dtype = T.bfloat16
+    out_dtype = T.float8_e4m3
+    scale_dtype = T.float32
+    compute_dtype = T.float32  # Internal computation in FP32;
+
+    x: T.Tensor[(M, N), in_dtype]
+
+    blk_m = 32
+    group_size = block_size
+
+    quant = T.empty((M, N), out_dtype)
+    scale = T.empty((M, T.ceildiv(N, group_size)), scale_dtype)
+
+    fp8_max_inv = 1 / fp8_max
+    num_stages = 0 if round_scale else 2
+
+    with T.Kernel(T.ceildiv(M, blk_m), T.ceildiv(N, group_size), threads=128) as (
+        bx,
+        by,
+    ):
+        x_shared = T.alloc_shared((blk_m, group_size), in_dtype)
+        x_local = T.alloc_fragment((blk_m, group_size), in_dtype)
+        amax_local = T.alloc_fragment((blk_m,), compute_dtype)
+        s_local = T.alloc_fragment((blk_m,), compute_dtype)
+        y_local = T.alloc_fragment((blk_m, group_size), out_dtype)
+        y_shared = T.alloc_shared((blk_m, group_size), out_dtype)
+
+        for _ in T.Pipelined(1, num_stages=num_stages):
+            T.copy(x[bx * blk_m, by * group_size], x_shared, disable_tma=True)
+            T.copy(x_shared, x_local)
+
+            T.reduce_absmax(x_local, amax_local, dim=1)
+            for i in T.Parallel(blk_m):
+                amax_local[i] = T.max(amax_local[i], 1e-4)
+                if round_scale:
+                    s_local[i] = fast_round_scale(amax_local[i], fp8_max_inv)
+                else:
+                    s_local[i] = amax_local[i] * fp8_max_inv
+            for i, j in T.Parallel(blk_m, group_size):
+                y_local[i, j] = T.clamp(x_local[i, j] / s_local[i], fp8_min, fp8_max)
+
+            for i in T.Parallel(blk_m):
+                scale[bx * blk_m + i, by] = s_local[i]
+            T.copy(y_local, y_shared)
+            T.copy(y_shared, quant[bx * blk_m, by * group_size], disable_tma=True)
+
+    return quant, scale
+
+signature:
+(x, block_size=128, round_scale=True)
+args:
+<class 'torch.Tensor'> torch.Size([256, 1024]) torch.bfloat16
+kwargs:{'block_size': 128, 'round_scale': False}
+params:
+KernelParam(dtype=dtype('bfloat16'), shape=[M, 1024])
+KernelParam(dtype=dtype('float8_e4m3'), shape=[M, 1024])
+KernelParam(dtype=dtype('float32'), shape=[M, 8])
+global_symbol=fp8_quant_kernel
+io tensor:
+torch.Size([256, 1024]) torch.bfloat16
+torch.Size([256, 1024]) torch.float8_e4m3fn
+torch.Size([256, 8]) torch.float32
+func_source:
+@tilelang.jit(
+    pass_configs={
+        tilelang.PassConfigKey.TL_DISABLE_WARP_SPECIALIZED: True,
+    }
+)
+def fp8_quant_kernel(
+    x,
+    block_size=128,
+    round_scale=True,  # round scale to exponential of 2
+):
+    """Block-wise FP8 quantization."""
+
+    M = T.dynamic("M")
+    N = T.const("N")
+    fp8_min, fp8_max = -448.0, 448.0
+    in_dtype = T.bfloat16
+    out_dtype = T.float8_e4m3
+    scale_dtype = T.float32
+    compute_dtype = T.float32  # Internal computation in FP32;
+
+    x: T.Tensor[(M, N), in_dtype]
+
+    blk_m = 32
+    group_size = block_size
+
+    quant = T.empty((M, N), out_dtype)
+    scale = T.empty((M, T.ceildiv(N, group_size)), scale_dtype)
+
+    fp8_max_inv = 1 / fp8_max
+    num_stages = 0 if round_scale else 2
+
+    with T.Kernel(T.ceildiv(M, blk_m), T.ceildiv(N, group_size), threads=128) as (
+        bx,
+        by,
+    ):
+        x_shared = T.alloc_shared((blk_m, group_size), in_dtype)
+        x_local = T.alloc_fragment((blk_m, group_size), in_dtype)
+        amax_local = T.alloc_fragment((blk_m,), compute_dtype)
+        s_local = T.alloc_fragment((blk_m,), compute_dtype)
+        y_local = T.alloc_fragment((blk_m, group_size), out_dtype)
+        y_shared = T.alloc_shared((blk_m, group_size), out_dtype)
+
+        for _ in T.Pipelined(1, num_stages=num_stages):
+            T.copy(x[bx * blk_m, by * group_size], x_shared, disable_tma=True)
+            T.copy(x_shared, x_local)
+
+            T.reduce_absmax(x_local, amax_local, dim=1)
+            for i in T.Parallel(blk_m):
+                amax_local[i] = T.max(amax_local[i], 1e-4)
+                if round_scale:
+                    s_local[i] = fast_round_scale(amax_local[i], fp8_max_inv)
+                else:
+                    s_local[i] = amax_local[i] * fp8_max_inv
+            for i, j in T.Parallel(blk_m, group_size):
+                y_local[i, j] = T.clamp(x_local[i, j] / s_local[i], fp8_min, fp8_max)
+
+            for i in T.Parallel(blk_m):
+                scale[bx * blk_m + i, by] = s_local[i]
+            T.copy(y_local, y_shared)
+            T.copy(y_shared, quant[bx * blk_m, by * group_size], disable_tma=True)
+
+    return quant, scale
+
+signature:
+(x, block_size=128, round_scale=True)
+args:
+<class 'torch.Tensor'> torch.Size([256, 1024]) torch.bfloat16
+kwargs:{'block_size': 128, 'round_scale': True}
+params:
+KernelParam(dtype=dtype('bfloat16'), shape=[M, 1024])
+KernelParam(dtype=dtype('float8_e4m3'), shape=[M, 1024])
+KernelParam(dtype=dtype('float32'), shape=[M, 8])
+global_symbol=fp8_quant_kernel
+io tensor:
+torch.Size([256, 1024]) torch.bfloat16
+torch.Size([256, 1024]) torch.float8_e4m3fn
+torch.Size([256, 8]) torch.float32
+文件名: /home/yesuwei/workspace/tilelang/tilelang/utils/sparse.py
+行号: 40
+文件名: /home/yesuwei/workspace/tilelang/./examples/quickstart.py
+行号: 8
+func_source:
+@tilelang.jit
+def matmul(A, B, block_M: int, block_N: int, block_K: int):
+    M, N, K = T.const("M, N, K")
+    dtype = T.float16
+    accum_dtype = T.float32
+    A: T.Tensor((M, K), dtype)
+    B: T.Tensor((K, N), dtype)
+    C = T.empty((M, N), dtype)
+
+    # Initialize Kernel Context
+    with T.Kernel(T.ceildiv(N, block_N), T.ceildiv(M, block_M), threads=128) as (bx, by):
+        A_shared = T.alloc_shared((block_M, block_K), dtype)
+        B_shared = T.alloc_shared((block_K, block_N), dtype)
+        C_local = T.alloc_fragment((block_M, block_N), accum_dtype)
+
+        # Enable rasterization for better L2 cache locality (Optional)
+        # T.use_swizzle(panel_size=10, enable=True)
+
+        # Clear local accumulation
+        T.clear(C_local)
+
+        for ko in T.Pipelined(T.ceildiv(K, block_K), num_stages=3):
+            # Copy tile of A
+            # This is a sugar syntax for parallelized copy
+            T.copy(A[by * block_M, ko * block_K], A_shared)
+
+            # Copy tile of B
+            T.copy(B[ko * block_K, bx * block_N], B_shared)
+
+            # Perform a tile-level GEMM on the shared buffers
+            # Currently we dispatch to the cute/hip on Nvidia/AMD GPUs
+            T.gemm(A_shared, B_shared, C_local)
+
+        # relu
+        for i, j in T.Parallel(block_M, block_N):
+            C_local[i, j] = T.max(C_local[i, j], 0)
+
+        # Copy result back to global memory
+        T.copy(C_local, C[by * block_M, bx * block_N])
+
+    return C
+
+signature:
+(A, B, block_M: int, block_N: int, block_K: int)
+args:
+kwargs:{'M': 1024, 'N': 1024, 'K': 1024, 'block_M': 128, 'block_N': 128, 'block_K': 32}
+params:
+KernelParam(dtype=dtype('float16'), shape=[1024, 1024])
+KernelParam(dtype=dtype('float16'), shape=[1024, 1024])
+KernelParam(dtype=dtype('float16'), shape=[1024, 1024])
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+global_symbol=matmul
+io tensor:
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16
+torch.Size([1024, 1024]) torch.float16

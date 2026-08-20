@@ -249,7 +249,15 @@ class TVMFFIKernelAdapter(BaseKernelAdapter):
                     tensor = inputs[ins_idx]
                     ins_idx += 1
                 tensor_list.append(tensor)
-
+            global_symbol = self.prim_func.attrs["global_symbol"]
+            with open("tilelangcompiler.log",'a') as f:
+                print(f"global_symbol={global_symbol}",file=f)
+                print("io tensor:",file=f)
+                for tensor in tensor_list:
+                    if isinstance(tensor, torch.Tensor):
+                        print(tensor.shape,tensor.dtype, file=f)
+                    else:
+                        print(tensor, file=f)
             executable(*tensor_list)
 
             # Return outputs in the requested form

@@ -330,7 +330,11 @@ def lower(
         target_host=target_host,
         runtime_only=runtime_only,
     )
-
+    # TileLang compiled kernel extraction
+    with open("tilelangcompiler.log",'a') as f:
+        print("params:",file=f)
+        for param in params:
+            print(f"{param}",file=f)
     codegen_mod = device_codegen(device_mod, target) if enable_device_compile else device_codegen_without_compile(device_mod, target)
     kernel_source = codegen_mod.inspect_source()
 

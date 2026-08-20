@@ -437,6 +437,18 @@ class JITImpl(Generic[_P, _KP, _T, _Ret]):
 
     def compile(self, *args: _P.args, **kwargs: _P.kwargs) -> _Ret:
         prim_func = self.get_tir(*args, **kwargs)
+        # TileLang compiled kernel extraction
+        with open("tilelangcompiler.log",'a') as f:
+            print(f"func_source:\n{self.func_source}", file=f)
+            print(f"signature:\n{self.signature}", file=f)
+            import torch
+            print("args:",file=f)
+            for i in args:
+                if isinstance(i, torch.Tensor):
+                    print(type(i),i.shape,i.dtype, file=f)
+                else:
+                    print(type(i),i, file=f)
+            print(f"kwargs:{kwargs}", file=f)
         kernel_result = compile(
             prim_func,
             out_idx=self.out_idx,
@@ -606,13 +618,18 @@ def jit(
         debug_root_path=debug_root_path,
         compile_flags=compile_flags,
     )
-
+    stack = inspect.stack()
+    if len(stack) > 1:
+        caller = stack[1]
+        # TileLang compiled kernel extraction
+        with open("tilelangcompiler.log",'a') as f:
+            print(f"文件名: {caller.filename}", file=f)
+            print(f"行号: {caller.lineno}", file=f)
     def decorator(func: Callable[_P, _T]):
         mode = "auto"
         pf: JITFunc[_P, _T] = prim_func(func, eager_jit=True)
         func_source = inspect.getsource(pf.orig_func)
         signature = inspect.signature(pf.orig_func)
-
         return JITImpl(
             func=pf,
             **compile_args,
