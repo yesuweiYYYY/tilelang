@@ -1,4 +1,5 @@
 import tilelang.testing
+import torch
 import fp8_lighting_indexer
 import sparse_mla_bwd
 import sparse_mla_fwd
@@ -19,6 +20,9 @@ def regression_sparse_mla_fwd():
 
 
 def regression_sparse_mla_fwd_pipelined():
+    if torch.cuda.get_device_capability()[0] < 9:
+        print("  (skipped: TMA pipeline requires SM90+)")
+        return
     tilelang.testing.process_func(sparse_mla_fwd_pipelined.run_regression_perf, S=256, SKV=512, H=64, HKV=1, DQK=576, DV=512, topk=256)
 
 

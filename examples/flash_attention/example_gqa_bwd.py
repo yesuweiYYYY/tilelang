@@ -256,6 +256,7 @@ def flashattn_bwd_split(batch, heads, seq_len, dim_qk, dim_v, is_causal, block_M
     dv_shape = [groups, batch, seq_len, head_kv, dim_v]  # sum after kernel
     dtype = T.float16
     accum_dtype = T.float32
+    use_shared_epilogue = torch.cuda.get_device_capability()[0] >= 9
 
     @T.prim_func
     def flash_bwd(
@@ -284,9 +285,9 @@ def flashattn_bwd_split(batch, heads, seq_len, dim_qk, dim_v, is_causal, block_M
             dv = T.alloc_fragment([block_M, dim_v], accum_dtype)
             dk = T.alloc_fragment([block_M, dim_qk], accum_dtype)
             dq = T.alloc_fragment([block_N, dim_qk], accum_dtype)
-            dv_shared = T.alloc_shared([block_M, dim_v], dtype)
-            dk_shared = T.alloc_shared([block_M, dim_qk], dtype)
-
+            if use_shared_epilogue:
+                dv_shared = T.alloc_shared([block_M, dim_v], dtype)
+                dk_shared = T.alloc_shared([block_M, dim_qk], dtype)
             T.annotate_layout(
                 {
                     dQ: make_dq_layout(dQ),
@@ -327,10 +328,14 @@ def flashattn_bwd_split(batch, heads, seq_len, dim_qk, dim_v, is_causal, block_M
                 for i, j in T.Parallel(block_N, dim_qk):
                     T.atomic_add(dQ[bz, k * block_N + i, bx, j], dq[i, j])
 
-            T.copy(dv, dv_shared)
-            T.copy(dv_shared, dV[bx % groups, bz, by * block_M : (by + 1) * block_M, bx // groups, :])
-            T.copy(dk, dk_shared)
-            T.copy(dk, dK[bx % groups, bz, by * block_M : (by + 1) * block_M, bx // groups, :])
+            if use_shared_epilogue:
+                T.copy(dv, dv_shared)
+                T.copy(dv_shared, dV[bx % groups, bz, by * block_M : (by + 1) * block_M, bx // groups, :])
+                T.copy(dk, dk_shared)
+                T.copy(dk_shared, dK[bx % groups, bz, by * block_M : (by + 1) * block_M, bx // groups, :])
+            else:
+                T.copy(dv, dV[bx % groups, bz, by * block_M : (by + 1) * block_M, bx // groups, :])
+                T.copy(dk, dK[bx % groups, bz, by * block_M : (by + 1) * block_M, bx // groups, :])
 
     return flash_bwd
 
@@ -492,6 +497,7 @@ def run_regression_perf():
     D_HEAD_V = 128
     groups = 16
     causal = False
+    sm_major, _ = torch.cuda.get_device_capability()
     device = "cuda"
     torch.manual_seed(42)
     head_kv = H // groups
@@ -511,9 +517,9 @@ def run_regression_perf():
             D_HEAD_V,
             causal,
             block_M=128,
-            block_N=32,
+            block_N=16 if sm_major < 9 else 32,
             threads=256,
-            num_stages=2,
+            num_stages=1 if sm_major < 9 else 2,
             groups=groups,
         )
     dQ = torch.zeros_like(Q, dtype=torch.float32)

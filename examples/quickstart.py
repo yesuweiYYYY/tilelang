@@ -16,8 +16,10 @@ def matmul(A, B, block_M: int, block_N: int, block_K: int):
 
     # Initialize Kernel Context
     with T.Kernel(T.ceildiv(N, block_N), T.ceildiv(M, block_M), threads=128) as (bx, by):
-        A_shared = T.alloc_shared((block_M, block_K), dtype)
-        B_shared = T.alloc_shared((block_K, block_N), dtype)
+        # Keep two panels. T.gemm cannot take an offset on the M/N dimension of
+        # a 2D shared region, so expose the second panel through a leading dim.
+        A_shared = T.alloc_shared((2, block_M, block_K), dtype)
+        B_shared = T.alloc_shared((2, block_K, block_N), dtype)
         C_local = T.alloc_fragment((block_M, block_N), accum_dtype)
 
         # Enable rasterization for better L2 cache locality (Optional)
@@ -27,17 +29,19 @@ def matmul(A, B, block_M: int, block_N: int, block_K: int):
         T.clear(C_local)
 
         for ko in T.Pipelined(T.ceildiv(K, block_K), num_stages=3):
-            # Copy tile of A
-            # This is a sugar syntax for parallelized copy
-            T.copy(A[by * block_M, ko * block_K], A_shared)
+            # Explicit source regions are needed because the destination is 3D
+            # while A/B are 2D.
+            T.copy(
+                A[by * block_M:by * block_M + block_M, ko * block_K:ko * block_K + block_K],
+                A_shared[1, :, :],
+            )
+            T.copy(
+                B[ko * block_K:ko * block_K + block_K, bx * block_N:bx * block_N + block_N],
+                B_shared[1, :, :],
+            )
 
-            # Copy tile of B
-            T.copy(B[ko * block_K, bx * block_N], B_shared)
-
-            # Perform a tile-level GEMM on the shared buffers
-            # Currently we dispatch to the cute/hip on Nvidia/AMD GPUs
-            T.gemm(A_shared, B_shared, C_local)
-
+            # Perform a tile-level GEMM on the second shared panel
+            T.gemm(A_shared[1, :, :], B_shared[1, :, :], C_local)
         # relu
         for i, j in T.Parallel(block_M, block_N):
             C_local[i, j] = T.max(C_local[i, j], 0)
@@ -46,7 +50,6 @@ def matmul(A, B, block_M: int, block_N: int, block_K: int):
         T.copy(C_local, C[by * block_M, bx * block_N])
 
     return C
-
 
 M = 1024
 N = 1024

@@ -31,6 +31,9 @@ def sparse_mla_fwd(
     assert dim == tilelang.math.next_power_of_2(dim), f"haven't check padding correctness yet, dim={dim}"
     assert tail_dim == tilelang.math.next_power_of_2(tail_dim), f"haven't check padding correctness yet, dim={tail_dim}"
     assert is_causal == True, "non-casual is not supported"
+    if torch.cuda.get_device_capability()[0] < 9:
+        block_I = min(block_I, 16)
+        num_stages = 1
     assert topk % block_I == 0, "otherwise will load some index=0 thus causing wrong kv to be loaded"
     if sm_scale is None:
         sm_scale = (1.0 / (dim + tail_dim)) ** 0.5 * 1.44269504  # log2(e)
@@ -86,7 +89,6 @@ def sparse_mla_fwd(
         Q_tail_shared = T.alloc_shared([H_per_block, D_tail], dtype)
         KV_shared = T.alloc_shared([BI, D], dtype)
         K_tail_shared = T.alloc_shared([BI, D_tail], dtype)
-        O_shared = T.alloc_shared([H_per_block, D], dtype)
         Lse_shared = T.alloc_shared([H_per_block], accum_dtype)
         mask = T.alloc_fragment([BI], "bool")
 

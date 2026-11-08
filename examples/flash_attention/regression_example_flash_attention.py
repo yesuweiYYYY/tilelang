@@ -1,4 +1,5 @@
 import tilelang.testing
+import torch
 import example_gqa_fwd_bshd
 import example_mha_fwd_bhsd
 import example_mha_fwd_bshd
@@ -10,6 +11,9 @@ import example_mha_bwd_bhsd
 
 
 def regression_example_gqa_bwd_tma_reduce_varlen():
+    if torch.cuda.get_device_capability()[0] < 9:
+        print("  (skipped: TMA reduction requires SM90+)")
+        return
     tilelang.testing.process_func(example_gqa_bwd_tma_reduce_varlen.run_regression_perf)
 
 

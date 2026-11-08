@@ -11,7 +11,11 @@ from typing import Optional
 
 
 def get_configs():
-    iter_params = dict(block_M=[128], block_N=[128], num_stages=[0, 1, 2], threads=[128, 256])
+    if torch.cuda.get_device_capability()[0] < 9:
+        # Keep the tuning search within SM89's shared-memory budget.
+        iter_params = dict(block_M=[64], block_N=[64], num_stages=[1], threads=[128])
+    else:
+        iter_params = dict(block_M=[128], block_N=[128], num_stages=[0, 1, 2], threads=[128, 256])
     return [dict(zip(iter_params, values)) for values in itertools.product(*iter_params.values())]
 
 
@@ -260,10 +264,11 @@ def run_regression_perf(
     dtype: str = "float16",
 ):
     torch_dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16}[dtype]
-    block_M = 128
-    block_N = 128
-    num_stages = 2
-    threads = 256
+    if torch.cuda.get_device_capability()[0] < 9:
+        # The 128x128 tile exceeds SM89's dynamic shared-memory limit.
+        block_M, block_N, num_stages, threads = 64, 64, 1, 128
+    else:
+        block_M, block_N, num_stages, threads = 128, 128, 2, 256
     kernel = flashattn(
         batch, heads, seq_q, seq_kv, dim, window_size, block_M=block_M, block_N=block_N, num_stages=num_stages, threads=threads, dtype=dtype
     )

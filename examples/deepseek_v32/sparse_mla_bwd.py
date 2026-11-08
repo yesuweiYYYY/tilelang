@@ -121,13 +121,18 @@ def bwd(
 
     H = H_kv
     padded_H = max(tilelang.math.next_power_of_2(H_kv), 16)
-    block_H = min(64, padded_H)
+    sm_major, _ = torch.cuda.get_device_capability()
+    # The default 576-wide MLA tile exceeds SM89's dynamic shared-memory limit.
+    block_H = min(32 if sm_major < 9 else 64, padded_H)
+    if sm_major < 9:
+        block_size = min(block_size, 16)
+        threads = 128
     assert padded_H % block_H == 0
     NH = padded_H // block_H
     BS = block_size
     NS = tilelang.cdiv(topk, block_size)
 
-    split_store = 2
+    split_store = 4 if sm_major < 9 else 2
 
     Q: T.Tensor(q_shape, dtype)
     KV: T.Tensor(k_shape, dtype)
@@ -148,8 +153,6 @@ def bwd(
 
         P_shared_cast = T.alloc_shared([block_H, BS], dtype)
         dP_shared_cast = T.alloc_shared([block_H, BS], dtype)
-        dQ_shared = T.alloc_shared([block_H, D], dtype)
-        dQ_tail_shared = T.alloc_shared([block_H, D_tail], dtype)
 
         acc_p = T.alloc_fragment([block_H, BS], accum_dtype)
         acc_dp = T.alloc_fragment([block_H, BS], accum_dtype)
@@ -232,11 +235,8 @@ def bwd(
                     )
 
         # Store the accumulated dQ
-        T.copy(acc_dq, dQ_shared)
-        T.copy(acc_dq_tail, dQ_tail_shared)
-
-        T.copy(dQ_shared, dQ[by, s_i, bz * block_H : (bz + 1) * block_H, :D])
-        T.copy(dQ_tail_shared, dQ[by, s_i, bz * block_H : (bz + 1) * block_H, D:])
+        T.copy(acc_dq, dQ[by, s_i, bz * block_H : (bz + 1) * block_H, :D])
+        T.copy(acc_dq_tail, dQ[by, s_i, bz * block_H : (bz + 1) * block_H, D:])
 
     return dQ
 

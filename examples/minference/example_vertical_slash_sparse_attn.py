@@ -495,7 +495,15 @@ def vertical_slash_sparse_attention(
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     sources = [os.path.join(current_dir, "ops", "kernels.cpp"), os.path.join(current_dir, "ops", "vertical_slash_index.cu")]
-    ops = load(name="convert", sources=sources, verbose=False)
+    # PyTorch 2.11 headers use dependent-name syntax that requires C++20 with
+    # CUDA 13.3/GCC 12, while cpp_extension still defaults to C++17.
+    ops = load(
+        name="convert",
+        sources=sources,
+        verbose=False,
+        extra_cflags=["-std=c++20"],
+        extra_cuda_cflags=["-std=c++20"],
+    )
     convert_vertical_slash_indexes = ops.convert_vertical_slash_indexes
     batch_size, num_heads, context_size, head_dim = query.shape
     pad = (block_size_M - context_size) & (block_size_M - 1)
@@ -631,7 +639,13 @@ def run_regression_perf(batch=1, heads=1, seq_len=16384, head_dim=64, vertical_s
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     sources = [os.path.join(current_dir, "ops", "kernels.cpp"), os.path.join(current_dir, "ops", "vertical_slash_index.cu")]
-    ops = load(name="convert", sources=sources, verbose=False)
+    ops = load(
+        name="convert",
+        sources=sources,
+        verbose=False,
+        extra_cflags=["-std=c++20"],
+        extra_cuda_cflags=["-std=c++20"],
+    )
     convert_vertical_slash_indexes = ops.convert_vertical_slash_indexes
     batch_size, num_heads, context_size, head_dim = query.shape
     pad = (block_size_M - context_size) & (block_size_M - 1)
